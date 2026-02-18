@@ -153,7 +153,7 @@ func main() {
 			NumThreads: 1,
 			Provider:   "cpu",
 		}
-		vadDetector = sherpa.NewVoiceActivityDetector(vadCfg, 60)
+		vadDetector = sherpa.NewVoiceActivityDetector(vadCfg, float32(cfg.MaxAudioDurationS))
 		if vadDetector != nil {
 			defer sherpa.DeleteVoiceActivityDetector(vadDetector)
 			log.Printf("Silero VAD loaded (min_duration=%.0fs)", cfg.VADMinDurationS)
