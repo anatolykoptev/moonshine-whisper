@@ -18,6 +18,13 @@ import (
 	sherpa "github.com/k2-fsa/sherpa-onnx-go/sherpa_onnx"
 )
 
+// injected via -ldflags at build time
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 var (
 	recognizer *sherpa.OfflineRecognizer
 	mu         sync.Mutex // sherpa-onnx is not thread-safe
@@ -85,7 +92,8 @@ func warmup() {
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"ok","model":"moonshine-tiny-en-int8","engine":"sherpa-onnx"}`))
+	fmt.Fprintf(w, `{"status":"ok","model":"moonshine-tiny-en-int8","engine":"sherpa-onnx","version":%q,"commit":%q}`,
+		version, commit)
 }
 
 func handleTranscribe(w http.ResponseWriter, r *http.Request) {

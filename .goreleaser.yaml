@@ -1,0 +1,60 @@
+version: 2
+
+project_name: moonshine-whisper
+
+before:
+  hooks:
+    - go mod tidy
+
+# We distribute via Docker (CGO requires native build per arch).
+# GoReleaser handles only: changelog, GitHub Release notes, source archive.
+builds:
+  - skip: true
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+    files:
+      - README.md
+      - LICENSE
+      - Dockerfile
+      - docker-compose.example.yml
+      - install.sh
+      - "*.go"
+      - go.mod
+      - go.sum
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: anatolykoptev
+    name: moonshine-whisper
+  name_template: "v{{ .Version }}"
+  header: |
+    ## moonshine-whisper {{ .Tag }}
+
+    Fast speech-to-text HTTP service powered by [Moonshine](https://github.com/usefulsensors/moonshine) + sherpa-onnx.
+    **Beats faster-whisper 2.4× on ARM64 CPU.**
+
+    ### Docker (recommended)
+    ```bash
+    # Pull multi-arch image (linux/amd64 + linux/arm64)
+    docker pull ghcr.io/anatolykoptev/moonshine-whisper:{{ .Tag }}
+    ```
+
+    ### One-line install
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/anatolykoptev/moonshine-whisper/main/install.sh | sh
+    ```
+  footer: |
+    **Full Changelog**: https://github.com/anatolykoptev/moonshine-whisper/compare/{{ .PreviousTag }}...{{ .Tag }}
