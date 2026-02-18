@@ -75,6 +75,45 @@ jobs:
         id: tag
         run: echo "tag=${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}" >> $GITHUB_OUTPUT
 
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          # Find previous tag
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${TAG}$" | head -1)
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${TAG}"
+          else
+            RANGE="${TAG}"
+          fi
+
+          # Build changelog grouped by type
+          FEATURES=$(git log "$RANGE" --pretty=format:"- %s" | grep -E "^- feat" | sed 's/^- feat: /- /' | sed 's/^- feat!: /- ⚠️ /')
+          FIXES=$(git log "$RANGE" --pretty=format:"- %s" | grep -E "^- fix" | sed 's/^- fix: /- /')
+          PERF=$(git log "$RANGE" --pretty=format:"- %s" | grep -E "^- perf" | sed 's/^- perf: /- /')
+          REFACTOR=$(git log "$RANGE" --pretty=format:"- %s" | grep -E "^- refactor" | sed 's/^- refactor: /- /')
+          DOCS=$(git log "$RANGE" --pretty=format:"- %s" | grep -E "^- docs" | sed 's/^- docs: /- /')
+
+          CHANGELOG=""
+          [ -n "$FEATURES" ] && CHANGELOG="${CHANGELOG}### ✨ New Features\n${FEATURES}\n\n"
+          [ -n "$FIXES" ]    && CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes\n${FIXES}\n\n"
+          [ -n "$PERF" ]     && CHANGELOG="${CHANGELOG}### ⚡ Performance\n${PERF}\n\n"
+          [ -n "$REFACTOR" ] && CHANGELOG="${CHANGELOG}### ♻️ Refactoring\n${REFACTOR}\n\n"
+          [ -n "$DOCS" ]     && CHANGELOG="${CHANGELOG}### 📚 Docs\n${DOCS}\n\n"
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="### Changes\n"
+            git log "$RANGE" --pretty=format:"- %s" | grep -v "^- ci\|^- chore" >> /dev/null
+            CHANGELOG="${CHANGELOG}$(git log "$RANGE" --pretty=format:"- %s")\n\n"
+          fi
+
+          [ -n "$PREV_TAG" ] && CHANGELOG="${CHANGELOG}**Full diff:** [\`${PREV_TAG}..${TAG}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG})\n\n"
+
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          printf "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -82,8 +121,8 @@ jobs:
           TAG="${{ steps.tag.outputs.tag }}"
           NOTES="## moonshine-whisper ${TAG}
 
-          Fast speech-to-text HTTP service via Moonshine + sherpa-onnx.
-          **2.4× faster than faster-whisper Python on ARM64 CPU.**
+          ${{ steps.changelog.outputs.changelog }}
+          ---
 
           ### Install (one-line)
           \`\`\`bash
