@@ -50,52 +50,47 @@ func transcribeFile(audioPath, lang string, vadOverride *bool) (TranscribeRespon
 		}, http.StatusBadRequest
 	}
 
+	if lang == "ru" && recognizerRU == nil {
+		return TranscribeResponse{Error: "RU model not loaded; set ZIPFORMER_RU_DIR"}, http.StatusServiceUnavailable
+	}
+
 	// VAD: auto-enable for long audio, respect explicit override
 	useVAD := vadDetector != nil && audioDurS >= cfg.VADMinDurationS
 	if vadOverride != nil {
 		useVAD = *vadOverride && vadDetector != nil
 	}
 
+	// Build list of chunks to transcribe
+	var chunks [][]float32
 	var speechMs float64
+
 	if useVAD {
-		speech := applyVAD(samples)
-		if len(speech) == 0 {
+		chunks = applyVADChunked(samples)
+		if len(chunks) == 0 {
 			return TranscribeResponse{DurationMs: float64(time.Since(start).Milliseconds())}, http.StatusOK
 		}
-		speechMs = float64(len(speech)) / 16.0
-		log.Printf("VAD: %.0fms speech / %.0fms total (%.0f%%)",
-			speechMs, audioDurS*1000, 100*speechMs/(audioDurS*1000))
-		samples = speech
-	}
-
-	var text string
-	switch lang {
-	case "ru":
-		if recognizerRU == nil {
-			return TranscribeResponse{Error: "RU model not loaded; set ZIPFORMER_RU_DIR"}, http.StatusServiceUnavailable
+		for _, c := range chunks {
+			speechMs += float64(len(c)) / 16.0
 		}
-		muRU.Lock()
-		s := sherpa.NewOfflineStream(recognizerRU)
-		s.AcceptWaveform(sampleRate, samples)
-		recognizerRU.Decode(s)
-		text = s.GetResult().Text
-		sherpa.DeleteOfflineStream(s)
-		muRU.Unlock()
-	default:
-		muEN.Lock()
-		s := sherpa.NewOfflineStream(recognizerEN)
-		s.AcceptWaveform(sampleRate, samples)
-		recognizerEN.Decode(s)
-		text = s.GetResult().Text
-		sherpa.DeleteOfflineStream(s)
-		muEN.Unlock()
+		log.Printf("VAD: %.0fms speech / %.0fms total (%.0f%%), %d chunk(s)",
+			speechMs, audioDurS*1000, 100*speechMs/(audioDurS*1000), len(chunks))
+	} else {
+		chunks = [][]float32{samples}
 	}
 
-	text = strings.TrimSpace(text)
-	if ratio := compressionRatio(text); ratio > 2.4 {
-		log.Printf("WARNING: compression ratio %.2f > 2.4, clearing hallucination: %q", ratio, text)
-		text = ""
+	// Transcribe each chunk, filter hallucinations, join
+	var parts []string
+	for _, chunk := range chunks {
+		t := strings.TrimSpace(recognizeChunk(chunk, sampleRate, lang))
+		if ratio := compressionRatio(t); ratio > 2.4 {
+			log.Printf("WARNING: chunk compression ratio %.2f > 2.4, skipping hallucination", ratio)
+			continue
+		}
+		if t != "" {
+			parts = append(parts, t)
+		}
 	}
+	text := strings.Join(parts, " ")
 
 	resp := TranscribeResponse{
 		Text:       text,
@@ -107,8 +102,12 @@ func transcribeFile(audioPath, lang string, vadOverride *bool) (TranscribeRespon
 	return resp, http.StatusOK
 }
 
-func applyVAD(samples []float32) []float32 {
+// applyVADChunked feeds samples into VAD and returns speech segments
+// grouped into chunks of at most 25 seconds each.
+func applyVADChunked(samples []float32) [][]float32 {
 	const windowSize = 512
+	const maxChunkSamples = 25 * 16000 // 25s × 16kHz
+
 	muVAD.Lock()
 	defer muVAD.Unlock()
 
@@ -116,20 +115,51 @@ func applyVAD(samples []float32) []float32 {
 		vadDetector.AcceptWaveform(samples[i : i+windowSize])
 	}
 	if rem := len(samples) % windowSize; rem != 0 {
-		chunk := make([]float32, windowSize)
-		copy(chunk, samples[len(samples)-rem:])
-		vadDetector.AcceptWaveform(chunk)
+		pad := make([]float32, windowSize)
+		copy(pad, samples[len(samples)-rem:])
+		vadDetector.AcceptWaveform(pad)
 	}
 	vadDetector.Flush()
 
-	var speech []float32
+	var chunks [][]float32
+	var current []float32
 	for !vadDetector.IsEmpty() {
 		seg := vadDetector.Front()
-		speech = append(speech, seg.Samples...)
+		if len(current)+len(seg.Samples) > maxChunkSamples && len(current) > 0 {
+			chunks = append(chunks, current)
+			current = nil
+		}
+		current = append(current, seg.Samples...)
 		vadDetector.Pop()
 	}
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
 	vadDetector.Reset()
-	return speech
+	return chunks
+}
+
+func recognizeChunk(samples []float32, sampleRate int, lang string) string {
+	switch lang {
+	case "ru":
+		muRU.Lock()
+		s := sherpa.NewOfflineStream(recognizerRU)
+		s.AcceptWaveform(sampleRate, samples)
+		recognizerRU.Decode(s)
+		text := s.GetResult().Text
+		sherpa.DeleteOfflineStream(s)
+		muRU.Unlock()
+		return text
+	default:
+		muEN.Lock()
+		s := sherpa.NewOfflineStream(recognizerEN)
+		s.AcceptWaveform(sampleRate, samples)
+		recognizerEN.Decode(s)
+		text := s.GetResult().Text
+		sherpa.DeleteOfflineStream(s)
+		muEN.Unlock()
+		return text
+	}
 }
 
 func compressionRatio(text string) float64 {
