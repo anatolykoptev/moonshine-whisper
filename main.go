@@ -26,12 +26,15 @@ var (
 )
 
 var (
-	recognizer *sherpa.OfflineRecognizer
-	mu         sync.Mutex // sherpa-onnx is not thread-safe
+	recognizerEN *sherpa.OfflineRecognizer
+	recognizerRU *sherpa.OfflineRecognizer
+	muEN         sync.Mutex
+	muRU         sync.Mutex
 )
 
 type TranscribeRequest struct {
 	AudioPath string `json:"audio_path"`
+	Language  string `json:"language,omitempty"` // "en" (default) or "ru"
 }
 
 type TranscribeResponse struct {
@@ -42,58 +45,97 @@ type TranscribeResponse struct {
 
 func main() {
 	modelsDir := envOr("MOONSHINE_MODELS_DIR", "/models")
+	ruModelsDir := envOr("ZIPFORMER_RU_DIR", "/ru-models")
 	port := envOr("MOONSHINE_PORT", "8092")
 	numThreads := 4
 
-	log.Printf("Loading Moonshine model from %s...", modelsDir)
+	// Load EN model (Moonshine)
+	log.Printf("Loading Moonshine EN model from %s...", modelsDir)
 	t0 := time.Now()
-
-	config := &sherpa.OfflineRecognizerConfig{}
-	config.FeatConfig.SampleRate = 16000
-	config.FeatConfig.FeatureDim = 80
-	config.ModelConfig.Moonshine.Preprocessor = filepath.Join(modelsDir, "preprocess.onnx")
-	config.ModelConfig.Moonshine.Encoder = filepath.Join(modelsDir, "encode.int8.onnx")
-	config.ModelConfig.Moonshine.UncachedDecoder = filepath.Join(modelsDir, "uncached_decode.int8.onnx")
-	config.ModelConfig.Moonshine.CachedDecoder = filepath.Join(modelsDir, "cached_decode.int8.onnx")
-	config.ModelConfig.Tokens = filepath.Join(modelsDir, "tokens.txt")
-	config.ModelConfig.NumThreads = numThreads
-	config.ModelConfig.Provider = "cpu"
-	config.DecodingMethod = "greedy_search"
-
-	recognizer = sherpa.NewOfflineRecognizer(config)
-	if recognizer == nil {
-		log.Fatalf("Failed to create recognizer from %s", modelsDir)
+	cfgEN := &sherpa.OfflineRecognizerConfig{}
+	cfgEN.FeatConfig.SampleRate = 16000
+	cfgEN.FeatConfig.FeatureDim = 80
+	cfgEN.ModelConfig.Moonshine.Preprocessor = filepath.Join(modelsDir, "preprocess.onnx")
+	cfgEN.ModelConfig.Moonshine.Encoder = filepath.Join(modelsDir, "encode.int8.onnx")
+	cfgEN.ModelConfig.Moonshine.UncachedDecoder = filepath.Join(modelsDir, "uncached_decode.int8.onnx")
+	cfgEN.ModelConfig.Moonshine.CachedDecoder = filepath.Join(modelsDir, "cached_decode.int8.onnx")
+	cfgEN.ModelConfig.Tokens = filepath.Join(modelsDir, "tokens.txt")
+	cfgEN.ModelConfig.NumThreads = numThreads
+	cfgEN.ModelConfig.Provider = "cpu"
+	cfgEN.DecodingMethod = "greedy_search"
+	recognizerEN = sherpa.NewOfflineRecognizer(cfgEN)
+	if recognizerEN == nil {
+		log.Fatalf("Failed to load EN model from %s", modelsDir)
 	}
-	defer sherpa.DeleteOfflineRecognizer(recognizer)
+	defer sherpa.DeleteOfflineRecognizer(recognizerEN)
+	log.Printf("EN model loaded in %.2fs", time.Since(t0).Seconds())
 
-	log.Printf("Model loaded in %.2fs", time.Since(t0).Seconds())
+	// Load RU model (Zipformer) if available
+	ruEncoder := filepath.Join(ruModelsDir, "encoder.int8.onnx")
+	if _, err := os.Stat(ruEncoder); err == nil {
+		log.Printf("Loading Zipformer RU model from %s...", ruModelsDir)
+		t1 := time.Now()
+		cfgRU := &sherpa.OfflineRecognizerConfig{}
+		cfgRU.FeatConfig.SampleRate = 16000
+		cfgRU.FeatConfig.FeatureDim = 80
+		cfgRU.ModelConfig.Transducer.Encoder = ruEncoder
+		cfgRU.ModelConfig.Transducer.Decoder = filepath.Join(ruModelsDir, "decoder.int8.onnx")
+		cfgRU.ModelConfig.Transducer.Joiner = filepath.Join(ruModelsDir, "joiner.int8.onnx")
+		cfgRU.ModelConfig.Tokens = filepath.Join(ruModelsDir, "tokens.txt")
+		cfgRU.ModelConfig.NumThreads = numThreads
+		cfgRU.ModelConfig.Provider = "cpu"
+		cfgRU.DecodingMethod = "greedy_search"
+		recognizerRU = sherpa.NewOfflineRecognizer(cfgRU)
+		if recognizerRU != nil {
+			defer sherpa.DeleteOfflineRecognizer(recognizerRU)
+			log.Printf("RU model loaded in %.2fs", time.Since(t1).Seconds())
+		} else {
+			log.Printf("WARNING: failed to load RU model, RU transcription unavailable")
+		}
+	} else {
+		log.Printf("RU model not found at %s, RU transcription unavailable", ruModelsDir)
+	}
 
-	// Warm up with a short silence to initialize ONNX Runtime kernels
 	warmup()
 
 	http.HandleFunc("/transcribe", handleTranscribe)
 	http.HandleFunc("/transcribe/upload", handleUpload)
 	http.HandleFunc("/health", handleHealth)
 
-	log.Printf("Moonshine service listening on :%s (model-in-memory, ~0.26s inference)", port)
+	ruStatus := "unavailable"
+	if recognizerRU != nil {
+		ruStatus = "ready"
+	}
+	log.Printf("Service on :%s | EN: ready (~0.26s) | RU: %s (~0.19s)", port, ruStatus)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 func warmup() {
 	samples := make([]float32, 16000) // 1 sec silence
-	mu.Lock()
-	defer mu.Unlock()
-	stream := sherpa.NewOfflineStream(recognizer)
-	stream.AcceptWaveform(16000, samples)
-	recognizer.Decode(stream)
-	sherpa.DeleteOfflineStream(stream)
+
+	muEN.Lock()
+	ws := sherpa.NewOfflineStream(recognizerEN)
+	ws.AcceptWaveform(16000, samples)
+	recognizerEN.Decode(ws)
+	sherpa.DeleteOfflineStream(ws)
+	muEN.Unlock()
+
+	if recognizerRU != nil {
+		muRU.Lock()
+		ws2 := sherpa.NewOfflineStream(recognizerRU)
+		ws2.AcceptWaveform(16000, samples)
+		recognizerRU.Decode(ws2)
+		sherpa.DeleteOfflineStream(ws2)
+		muRU.Unlock()
+	}
 	log.Println("Warmup complete")
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"ok","model":"moonshine-tiny-en-int8","engine":"sherpa-onnx","version":%q,"commit":%q}`,
-		version, commit)
+	ruReady := recognizerRU != nil
+	fmt.Fprintf(w, `{"status":"ok","engine":"sherpa-onnx","version":%q,"commit":%q,"languages":{"en":{"model":"moonshine-tiny-en-int8","ready":true},"ru":{"model":"zipformer-ru-int8","ready":%v}}}`,
+		version, commit, ruReady)
 }
 
 func handleTranscribe(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +156,11 @@ func handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result := transcribeFile(req.AudioPath)
+	lang := strings.ToLower(strings.TrimSpace(req.Language))
+	if lang == "" {
+		lang = "en"
+	}
+	result := transcribeFile(req.AudioPath, lang)
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -151,11 +197,15 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	out.Close()
 	defer os.Remove(tmpFile)
 
-	result := transcribeFile(tmpFile)
+	lang := strings.ToLower(strings.TrimSpace(r.FormValue("language")))
+	if lang == "" {
+		lang = "en"
+	}
+	result := transcribeFile(tmpFile, lang)
 	json.NewEncoder(w).Encode(result)
 }
 
-func transcribeFile(audioPath string) TranscribeResponse {
+func transcribeFile(audioPath, lang string) TranscribeResponse {
 	start := time.Now()
 
 	wavPath := audioPath
@@ -177,17 +227,30 @@ func transcribeFile(audioPath string) TranscribeResponse {
 		return TranscribeResponse{Error: "load wav: " + err.Error()}
 	}
 
-	mu.Lock()
-	stream := sherpa.NewOfflineStream(recognizer)
-	stream.AcceptWaveform(sampleRate, samples)
-	recognizer.Decode(stream)
-	result := stream.GetResult()
-	sherpa.DeleteOfflineStream(stream)
-	mu.Unlock()
+	var text string
+	if lang == "ru" {
+		if recognizerRU == nil {
+			return TranscribeResponse{Error: "RU model not loaded; set ZIPFORMER_RU_DIR"}
+		}
+		muRU.Lock()
+		stream := sherpa.NewOfflineStream(recognizerRU)
+		stream.AcceptWaveform(sampleRate, samples)
+		recognizerRU.Decode(stream)
+		text = stream.GetResult().Text
+		sherpa.DeleteOfflineStream(stream)
+		muRU.Unlock()
+	} else {
+		muEN.Lock()
+		stream := sherpa.NewOfflineStream(recognizerEN)
+		stream.AcceptWaveform(sampleRate, samples)
+		recognizerEN.Decode(stream)
+		text = stream.GetResult().Text
+		sherpa.DeleteOfflineStream(stream)
+		muEN.Unlock()
+	}
 
-	text := strings.TrimSpace(result.Text)
 	return TranscribeResponse{
-		Text:       text,
+		Text:       strings.TrimSpace(text),
 		DurationMs: float64(time.Since(start).Milliseconds()),
 	}
 }
