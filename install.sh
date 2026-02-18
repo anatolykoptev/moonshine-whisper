@@ -7,10 +7,13 @@ REPO="anatolykoptev/moonshine-whisper"
 IMAGE="ghcr.io/${REPO}"
 MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2"
 RU_MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ru-2024-09-18.tar.bz2"
+VAD_MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
 MODEL_DIR="${HOME}/moonshine-model"
 RU_MODEL_DIR="${HOME}/moonshine-ru-model"
+VAD_DIR="${HOME}/moonshine-vad"
 PORT="${MOONSHINE_PORT:-8092}"
 INSTALL_RU="${INSTALL_RU:-1}"
+INSTALL_VAD="${INSTALL_VAD:-1}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 
@@ -71,6 +74,20 @@ else
   info "Skipping RU model (INSTALL_RU=0). Russian transcription will be unavailable."
 fi
 
+# ─── Download Silero VAD model ───────────────────────────────────────────────
+if [ "${INSTALL_VAD}" = "1" ]; then
+  if [ -f "${VAD_DIR}/silero_vad.onnx" ]; then
+    info "VAD model already present at ${VAD_DIR}, skipping."
+  else
+    info "Downloading Silero VAD model (~630 KB) ..."
+    mkdir -p "${VAD_DIR}"
+    curl -fsSL --progress-bar -o "${VAD_DIR}/silero_vad.onnx" "${VAD_MODEL_URL}"
+    success "VAD model downloaded to ${VAD_DIR}"
+  fi
+else
+  info "Skipping VAD model (INSTALL_VAD=0). Voice activity detection will be disabled."
+fi
+
 # ─── Remove old container if present ─────────────────────────────────────────
 if docker ps -a --format '{{.Names}}' | grep -q '^moonshine-whisper$'; then
   warn "Removing existing container 'moonshine-whisper' ..."
@@ -83,6 +100,10 @@ RU_MOUNT=""
 if [ "${INSTALL_RU}" = "1" ] && [ -f "${RU_MODEL_DIR}/tokens.txt" ]; then
   RU_MOUNT="-v ${RU_MODEL_DIR}:/ru-models:ro"
 fi
+VAD_MOUNT=""
+if [ "${INSTALL_VAD}" = "1" ] && [ -f "${VAD_DIR}/silero_vad.onnx" ]; then
+  VAD_MOUNT="-v ${VAD_DIR}:/vad:ro"
+fi
 
 docker run -d \
   --name moonshine-whisper \
@@ -90,6 +111,7 @@ docker run -d \
   -p "127.0.0.1:${PORT}:8092" \
   -v "${MODEL_DIR}:/models:ro" \
   ${RU_MOUNT} \
+  ${VAD_MOUNT} \
   "${IMAGE}:latest"
 
 # ─── Health check ─────────────────────────────────────────────────────────────

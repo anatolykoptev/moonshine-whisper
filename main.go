@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/zlib"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -30,16 +32,21 @@ var (
 	recognizerRU *sherpa.OfflineRecognizer
 	muEN         sync.Mutex
 	muRU         sync.Mutex
+
+	vadDetector *sherpa.VoiceActivityDetector
+	muVAD       sync.Mutex
 )
 
 type TranscribeRequest struct {
 	AudioPath string `json:"audio_path"`
 	Language  string `json:"language,omitempty"` // "en" (default) or "ru"
+	VAD       *bool  `json:"vad,omitempty"`      // nil=auto (use if loaded), false=skip
 }
 
 type TranscribeResponse struct {
 	Text       string  `json:"text"`
 	DurationMs float64 `json:"duration_ms"`
+	SpeechMs   float64 `json:"speech_ms,omitempty"` // set when VAD active
 	Error      string  `json:"error,omitempty"`
 }
 
@@ -113,6 +120,30 @@ func main() {
 		defer sherpa.DeleteOfflineRecognizer(recognizerRU)
 	}
 
+	// Load Silero VAD (optional)
+	vadModel := envOr("SILERO_VAD_MODEL", "/vad/silero_vad.onnx")
+	if _, err := os.Stat(vadModel); err == nil {
+		vadCfg := &sherpa.VadModelConfig{
+			SileroVad: sherpa.SileroVadModelConfig{
+				Model:              vadModel,
+				Threshold:          0.5,
+				MinSilenceDuration: 0.5,
+				MinSpeechDuration:  0.25,
+				WindowSize:         512,
+			},
+			SampleRate: 16000,
+			NumThreads: 1,
+			Provider:   "cpu",
+		}
+		vadDetector = sherpa.NewVoiceActivityDetector(vadCfg, 60)
+		if vadDetector != nil {
+			defer sherpa.DeleteVoiceActivityDetector(vadDetector)
+			log.Printf("Silero VAD loaded from %s", vadModel)
+		}
+	} else {
+		log.Printf("Silero VAD not found at %s (set SILERO_VAD_MODEL to enable)", vadModel)
+	}
+
 	warmup()
 
 	http.HandleFunc("/transcribe", handleTranscribe)
@@ -123,7 +154,11 @@ func main() {
 	if recognizerRU != nil {
 		ruStatus = "ready"
 	}
-	log.Printf("Service on :%s | EN: ready (~0.26s) | RU: %s (~0.19s)", port, ruStatus)
+	vadStatus := "disabled"
+	if vadDetector != nil {
+		vadStatus = "ready"
+	}
+	log.Printf("Service on :%s | EN: ready | RU: %s | VAD: %s", port, ruStatus, vadStatus)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
@@ -151,8 +186,9 @@ func warmup() {
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	ruReady := recognizerRU != nil
-	fmt.Fprintf(w, `{"status":"ok","engine":"sherpa-onnx","version":%q,"commit":%q,"languages":{"en":{"model":"moonshine-tiny-en-int8","ready":true},"ru":{"model":"zipformer-ru-int8","ready":%v}}}`,
-		version, commit, ruReady)
+	vadReady := vadDetector != nil
+	fmt.Fprintf(w, `{"status":"ok","engine":"sherpa-onnx","version":%q,"commit":%q,"vad":%v,"languages":{"en":{"model":"moonshine-tiny-en-int8","ready":true},"ru":{"model":"zipformer-ru-int8","ready":%v}}}`,
+		version, commit, vadReady, ruReady)
 }
 
 func handleTranscribe(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +213,7 @@ func handleTranscribe(w http.ResponseWriter, r *http.Request) {
 	if lang == "" {
 		lang = "en"
 	}
-	result := transcribeFile(req.AudioPath, lang)
+	result := transcribeFile(req.AudioPath, lang, &req)
 	json.NewEncoder(w).Encode(result)
 }
 
@@ -218,11 +254,53 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	if lang == "" {
 		lang = "en"
 	}
-	result := transcribeFile(tmpFile, lang)
+	vadVal := true
+	vadReq := TranscribeRequest{Language: lang, VAD: &vadVal}
+	if v := r.FormValue("vad"); v == "false" || v == "0" {
+		*vadReq.VAD = false
+	}
+	result := transcribeFile(tmpFile, lang, &vadReq)
 	json.NewEncoder(w).Encode(result)
 }
 
-func transcribeFile(audioPath, lang string) TranscribeResponse {
+func applyVAD(samples []float32) []float32 {
+	const windowSize = 512
+	muVAD.Lock()
+	defer muVAD.Unlock()
+
+	for i := 0; i+windowSize <= len(samples); i += windowSize {
+		vadDetector.AcceptWaveform(samples[i : i+windowSize])
+	}
+	// pad and feed remaining tail
+	if rem := len(samples) % windowSize; rem != 0 {
+		chunk := make([]float32, windowSize)
+		copy(chunk, samples[len(samples)-rem:])
+		vadDetector.AcceptWaveform(chunk)
+	}
+	vadDetector.Flush()
+
+	var speech []float32
+	for !vadDetector.IsEmpty() {
+		seg := vadDetector.Front()
+		speech = append(speech, seg.Samples...)
+		vadDetector.Pop()
+	}
+	vadDetector.Reset()
+	return speech
+}
+
+func compressionRatio(text string) float64 {
+	if len(text) < 10 {
+		return 0
+	}
+	var b bytes.Buffer
+	w := zlib.NewWriter(&b)
+	w.Write([]byte(text)) //nolint:errcheck
+	w.Close()
+	return float64(len(text)) / float64(b.Len())
+}
+
+func transcribeFile(audioPath, lang string, req *TranscribeRequest) TranscribeResponse {
 	start := time.Now()
 
 	wavPath := audioPath
@@ -242,6 +320,28 @@ func transcribeFile(audioPath, lang string) TranscribeResponse {
 	samples, sampleRate, err := loadWav(wavPath)
 	if err != nil {
 		return TranscribeResponse{Error: "load wav: " + err.Error()}
+	}
+
+	// Resample if needed (ffmpeg already targets 16kHz, but guard anyway)
+	if sampleRate != 16000 {
+		return TranscribeResponse{Error: fmt.Sprintf("unexpected sample rate %d (expected 16000)", sampleRate)}
+	}
+
+	// Apply Silero VAD if loaded and not explicitly disabled
+	var speechMs float64
+	useVAD := vadDetector != nil
+	if req != nil && req.VAD != nil {
+		useVAD = *req.VAD && vadDetector != nil
+	}
+	if useVAD {
+		totalMs := float64(len(samples)) / 16.0
+		samples = applyVAD(samples)
+		if len(samples) == 0 {
+			return TranscribeResponse{DurationMs: float64(time.Since(start).Milliseconds())}
+		}
+		speechMs = float64(len(samples)) / 16.0
+		log.Printf("VAD: %.0fms speech / %.0fms total (%.0f%% kept)",
+			speechMs, totalMs, 100*speechMs/totalMs)
 	}
 
 	var text string
@@ -266,10 +366,22 @@ func transcribeFile(audioPath, lang string) TranscribeResponse {
 		muEN.Unlock()
 	}
 
-	return TranscribeResponse{
-		Text:       strings.TrimSpace(text),
+	text = strings.TrimSpace(text)
+
+	// Hallucination guard: high compression ratio = repetitive output
+	if ratio := compressionRatio(text); ratio > 2.4 {
+		log.Printf("WARNING: compression ratio %.2f > 2.4, clearing likely hallucination: %q", ratio, text)
+		text = ""
+	}
+
+	resp := TranscribeResponse{
+		Text:       text,
 		DurationMs: float64(time.Since(start).Milliseconds()),
 	}
+	if speechMs > 0 {
+		resp.SpeechMs = speechMs
+	}
+	return resp
 }
 
 func loadWav(path string) ([]float32, int, error) {

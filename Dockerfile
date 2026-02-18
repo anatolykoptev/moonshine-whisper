@@ -55,11 +55,13 @@ COPY --from=builder /moonshine-whisper /usr/local/bin/moonshine-whisper
 
 VOLUME /models
 VOLUME /ru-models
+VOLUME /vad
 EXPOSE 8092
 
 ENV MOONSHINE_PORT=8092
 ENV MOONSHINE_MODELS_DIR=/models
 ENV ZIPFORMER_RU_DIR=/ru-models
+ENV SILERO_VAD_MODEL=/vad/silero_vad.onnx
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=3 \
     CMD curl -sf http://localhost:8092/health || exit 1
