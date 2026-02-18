@@ -1,0 +1,24 @@
+services:
+  moonshine-whisper:
+    image: ghcr.io/anatolykoptev/moonshine-whisper:latest
+    # build: .   # uncomment to build from source
+    container_name: moonshine-whisper
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8092:8092"
+    environment:
+      MOONSHINE_PORT: "8092"
+      MOONSHINE_MODELS_DIR: /models
+    volumes:
+      - ./sherpa-onnx-moonshine-tiny-en-int8:/models:ro
+      - /path/to/your/audio:/audio:ro   # optional: for path-based requests
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8092/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
