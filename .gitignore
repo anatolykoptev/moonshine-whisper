@@ -1,3 +1,4 @@
 moonshine-service
 moonshine-whisper
 *.env
+models/
