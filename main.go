@@ -49,9 +49,10 @@ func main() {
 	port := envOr("MOONSHINE_PORT", "8092")
 	numThreads := 4
 
-	// Load EN model (Moonshine)
-	log.Printf("Loading Moonshine EN model from %s...", modelsDir)
+	// Load EN and RU models in parallel to minimize startup time
 	t0 := time.Now()
+	var wg sync.WaitGroup
+
 	cfgEN := &sherpa.OfflineRecognizerConfig{}
 	cfgEN.FeatConfig.SampleRate = 16000
 	cfgEN.FeatConfig.FeatureDim = 80
@@ -63,18 +64,20 @@ func main() {
 	cfgEN.ModelConfig.NumThreads = numThreads
 	cfgEN.ModelConfig.Provider = "cpu"
 	cfgEN.DecodingMethod = "greedy_search"
-	recognizerEN = sherpa.NewOfflineRecognizer(cfgEN)
-	if recognizerEN == nil {
-		log.Fatalf("Failed to load EN model from %s", modelsDir)
-	}
-	defer sherpa.DeleteOfflineRecognizer(recognizerEN)
-	log.Printf("EN model loaded in %.2fs", time.Since(t0).Seconds())
 
-	// Load RU model (Zipformer) if available
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		t := time.Now()
+		recognizerEN = sherpa.NewOfflineRecognizer(cfgEN)
+		if recognizerEN == nil {
+			log.Fatalf("Failed to load EN model from %s", modelsDir)
+		}
+		log.Printf("EN model loaded in %.2fs", time.Since(t).Seconds())
+	}()
+
 	ruEncoder := filepath.Join(ruModelsDir, "encoder.int8.onnx")
 	if _, err := os.Stat(ruEncoder); err == nil {
-		log.Printf("Loading Zipformer RU model from %s...", ruModelsDir)
-		t1 := time.Now()
 		cfgRU := &sherpa.OfflineRecognizerConfig{}
 		cfgRU.FeatConfig.SampleRate = 16000
 		cfgRU.FeatConfig.FeatureDim = 80
@@ -85,15 +88,29 @@ func main() {
 		cfgRU.ModelConfig.NumThreads = numThreads
 		cfgRU.ModelConfig.Provider = "cpu"
 		cfgRU.DecodingMethod = "greedy_search"
-		recognizerRU = sherpa.NewOfflineRecognizer(cfgRU)
-		if recognizerRU != nil {
-			defer sherpa.DeleteOfflineRecognizer(recognizerRU)
-			log.Printf("RU model loaded in %.2fs", time.Since(t1).Seconds())
-		} else {
-			log.Printf("WARNING: failed to load RU model, RU transcription unavailable")
-		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t := time.Now()
+			recognizerRU = sherpa.NewOfflineRecognizer(cfgRU)
+			if recognizerRU != nil {
+				log.Printf("RU model loaded in %.2fs", time.Since(t).Seconds())
+			} else {
+				log.Printf("WARNING: failed to load RU model, RU transcription unavailable")
+			}
+		}()
 	} else {
 		log.Printf("RU model not found at %s, RU transcription unavailable", ruModelsDir)
+	}
+
+	wg.Wait()
+	log.Printf("All models loaded in %.2fs", time.Since(t0).Seconds())
+	if recognizerEN != nil {
+		defer sherpa.DeleteOfflineRecognizer(recognizerEN)
+	}
+	if recognizerRU != nil {
+		defer sherpa.DeleteOfflineRecognizer(recognizerRU)
 	}
 
 	warmup()
