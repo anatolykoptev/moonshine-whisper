@@ -32,7 +32,7 @@ func transcribeFile(audioPath, lang string, vadOverride *bool) (TranscribeRespon
 		cleanup = wavPath
 	}
 	if cleanup != "" {
-		defer os.Remove(cleanup)
+		defer os.Remove(cleanup) //nolint:errcheck
 	}
 
 	samples, sampleRate, err := loadWav(wavPath)
@@ -169,7 +169,7 @@ func compressionRatio(text string) float64 {
 	var b bytes.Buffer
 	w := zlib.NewWriter(&b)
 	w.Write([]byte(text)) //nolint:errcheck
-	w.Close()
+	_ = w.Close()
 	return float64(len(text)) / float64(b.Len())
 }
 
@@ -178,7 +178,7 @@ func loadWav(path string) ([]float32, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	header := make([]byte, 44)
 	if _, err := io.ReadFull(f, header); err != nil {

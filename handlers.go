@@ -122,7 +122,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "audio file required")
 		return
 	}
-	defer file.Close()
+	defer file.Close() //nolint:errcheck
 
 	ext := filepath.Ext(header.Filename)
 	if ext == "" {
@@ -135,8 +135,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	io.Copy(out, file) //nolint:errcheck
-	out.Close()
-	defer os.Remove(tmpFile)
+	_ = out.Close()
+	defer os.Remove(tmpFile) //nolint:errcheck
 
 	resp, status := transcribeFile(tmpFile, normLang(r.FormValue("language")), parseBoolPtr(r.FormValue("vad")))
 	writeJSON(w, status, resp)

@@ -19,7 +19,7 @@ import (
 var (
 	version   = "dev"
 	commit    = "unknown"
-	buildDate = "unknown"
+	buildDate = "unknown" //nolint:unused
 )
 
 var (
