@@ -21,6 +21,7 @@ type TranscribeRequest struct {
 	Language    string `json:"language,omitempty"`
 	VAD         *bool  `json:"vad,omitempty"`          // nil=auto, false=skip
 	MaxChunkLen int    `json:"max_chunk_len,omitempty"` // 0=no chunking
+	Punctuate   *bool  `json:"punctuate,omitempty"`     // nil=auto, true=force
 }
 
 // TranscribeResponse is the JSON response returned by transcription endpoints.
@@ -89,13 +90,14 @@ func parseBoolPtr(s string) *bool {
 // handleHealth returns service status, model readiness, and version info.
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":  "ok",
-		"engine":  "sherpa-onnx",
-		"version": version,
-		"commit":  commit,
-		"vad":     vadDetector != nil,
+		"status":      "ok",
+		"engine":      "sherpa-onnx",
+		"version":     version,
+		"commit":      commit,
+		"vad":         vadDetector != nil,
+		"punctuation": punctuator != nil,
 		"languages": map[string]any{
-			"en": map[string]any{"model": "moonshine-tiny-en-int8", "ready": true},
+			"en": map[string]any{"model": "moonshine-v2-base-en", "ready": true},
 			"ru": map[string]any{"model": "zipformer-ru-int8", "ready": recognizerRU != nil},
 		},
 	})
@@ -116,7 +118,7 @@ func handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "audio_path required")
 		return
 	}
-	resp, status := transcribeFile(req.AudioPath, normLang(req.Language), req.VAD)
+	resp, status := transcribeFile(req.AudioPath, normLang(req.Language), req.VAD, req.Punctuate)
 	if status == http.StatusOK && req.MaxChunkLen > 0 {
 		resp.Chunks = splitText(resp.Text, req.MaxChunkLen)
 	}
@@ -154,7 +156,8 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	_ = out.Close()
 	defer os.Remove(tmpFile) //nolint:errcheck
 
-	resp, status := transcribeFile(tmpFile, normLang(r.FormValue("language")), parseBoolPtr(r.FormValue("vad")))
+	resp, status := transcribeFile(tmpFile, normLang(r.FormValue("language")),
+		parseBoolPtr(r.FormValue("vad")), parseBoolPtr(r.FormValue("punctuate")))
 	if status == http.StatusOK {
 		if maxChunk, err := strconv.Atoi(r.FormValue("max_chunk_len")); err == nil && maxChunk > 0 {
 			resp.Chunks = splitText(resp.Text, maxChunk)

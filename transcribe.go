@@ -19,7 +19,7 @@ import (
 )
 
 // transcribeFile is the main entry point: converts audio, runs VAD, transcribes, and returns results.
-func transcribeFile(audioPath, lang string, vadOverride *bool) (TranscribeResponse, int) {
+func transcribeFile(audioPath, lang string, vadOverride, punctOverride *bool) (TranscribeResponse, int) {
 	start := time.Now()
 
 	wavPath, cleanupPath, err := ensureWav(audioPath)
@@ -55,6 +55,15 @@ func transcribeFile(audioPath, lang string, vadOverride *bool) (TranscribeRespon
 	}
 
 	text := transcribeChunks(chunks, sampleRate, lang)
+
+	// Apply punctuation: auto (nil) = yes if EN and model loaded; explicit override respected.
+	doPunct := punctuator != nil && lang == "en"
+	if punctOverride != nil {
+		doPunct = *punctOverride && punctuator != nil
+	}
+	if doPunct {
+		text = addPunctuation(text)
+	}
 
 	resp := TranscribeResponse{
 		Text:       text,
@@ -225,7 +234,13 @@ func loadWav(path string) ([]float32, int, error) {
 
 // parsePCM converts raw PCM bytes to float32 samples normalized to [-1, +1].
 func parsePCM(data []byte, numChannels, bitsPerSample, sampleRate int) ([]float32, int, error) {
-	var samples []float32
+	bytesPerFrame := numChannels * (bitsPerSample / 8)
+	if bytesPerFrame == 0 {
+		return nil, 0, fmt.Errorf("unsupported WAV: %dbit %dch", bitsPerSample, numChannels)
+	}
+	numSamples := len(data) / bytesPerFrame
+	samples := make([]float32, 0, numSamples)
+
 	switch {
 	case bitsPerSample == 16 && numChannels == 1:
 		for i := 0; i+1 < len(data); i += 2 {

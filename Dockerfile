@@ -1,5 +1,5 @@
 # ─── Stage 1: Go builder ──────────────────────────────────────────────────────
-FROM golang:1.22-bookworm AS builder
+FROM golang:1.26-bookworm AS builder
 
 ARG VERSION=dev
 ARG COMMIT=unknown
@@ -56,12 +56,14 @@ COPY --from=builder /moonshine-whisper /usr/local/bin/moonshine-whisper
 VOLUME /models
 VOLUME /ru-models
 VOLUME /vad
+VOLUME /punct
 EXPOSE 8092
 
 ENV MOONSHINE_PORT=8092
 ENV MOONSHINE_MODELS_DIR=/models
 ENV ZIPFORMER_RU_DIR=/ru-models
 ENV SILERO_VAD_MODEL=/vad/silero_vad.onnx
+ENV PUNCT_MODEL=/punct/model.int8.onnx
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=3 \
     CMD curl -sf http://localhost:8092/health || exit 1

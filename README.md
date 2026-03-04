@@ -3,9 +3,9 @@
 [![Release](https://img.shields.io/github/v/release/anatolykoptev/moonshine-whisper)](https://github.com/anatolykoptev/moonshine-whisper/releases)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/anatolykoptev/moonshine-whisper)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Go 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](go.mod)
+[![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](go.mod)
 
-Fast **multilingual** (EN + RU) speech-to-text HTTP service powered by [Moonshine](https://github.com/usefulsensors/moonshine) (English) and [Zipformer](https://github.com/k2-fsa/sherpa-onnx) (Russian) via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) Go bindings.
+Fast **multilingual** (EN + RU) speech-to-text HTTP service powered by [Moonshine v2](https://github.com/usefulsensors/moonshine) (English) and [Zipformer](https://github.com/k2-fsa/sherpa-onnx) (Russian) via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) Go bindings.
 
 **Both models loaded in-memory — no per-request cold start.**
 
@@ -13,60 +13,47 @@ Fast **multilingual** (EN + RU) speech-to-text HTTP service powered by [Moonshin
 
 | Model | Language | Avg | RTF | Size |
 |---|---|---|---|---|
-| **Moonshine tiny-en INT8** (this) | 🇺🇸 EN | **0.34s** / 11s audio | **0.031** ⭐ | 103 MB |
+| **Moonshine v2 base** (this) | 🇺🇸 EN | **0.57s** / 11s audio | **0.052** | 135 MB |
 | **Zipformer-RU INT8** (this) | 🇷🇺 RU | **0.19s** / 7s audio | **0.026** ⭐ | 66 MB |
 | faster-whisper tiny int8 (Python) | EN/RU | 0.82s / 11s audio | 0.075 | — |
 | whisper.cpp tiny-q8_0 | EN | 1.45s | 0.132 | — |
 
-> **Why not Whisper for Russian?** Whisper pads all audio to 30 seconds internally → slow on short clips. Zipformer-RU processes only actual audio duration. **21× faster than faster-whisper for Russian.**
+> **Why not Whisper for Russian?** Whisper pads all audio to 30 seconds internally → slow on short clips. Zipformer-RU processes only actual audio duration.
 
 ## Install
 
-### Option 1 — One-line (Docker required)
+### Option 1 — Docker manually
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/anatolykoptev/moonshine-whisper/main/install.sh | sh
-```
-
-Downloads EN model (~103 MB) + RU model (~70 MB) and starts the container on `127.0.0.1:8092`.
-
-Skip Russian model:
-```bash
-INSTALL_RU=0 curl -fsSL https://raw.githubusercontent.com/anatolykoptev/moonshine-whisper/main/install.sh | sh
-```
-
-### Option 2 — Docker manually
-
-```bash
-# Download EN model
-curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2 | tar -xj
-
-# Download RU model (optional)
-curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ru-2024-09-18.tar.bz2 | tar -xj
+# Download Moonshine v2 base EN model
+mkdir -p moonshine-models/en && cd moonshine-models/en
+for f in encoder_model.ort decoder_model_merged.ort tokens.txt; do
+  curl -LO "https://huggingface.co/csukuangfj2/sherpa-onnx-moonshine-base-en-quantized-2026-02-27/resolve/main/$f"
+done
+cd ../..
 
 # Run (multi-arch: linux/amd64 + linux/arm64)
 docker run -d \
   --name moonshine-whisper \
   --restart unless-stopped \
   -p 127.0.0.1:8092:8092 \
-  -v $(pwd)/sherpa-onnx-moonshine-tiny-en-int8:/models:ro \
-  -v $(pwd)/sherpa-onnx-zipformer-ru-2024-09-18:/ru-models:ro \
+  -v $(pwd)/moonshine-models/en:/models:ro \
   ghcr.io/anatolykoptev/moonshine-whisper:latest
 ```
 
-### Option 3 — docker compose
+### Option 2 — docker compose
 
 See [`docker-compose.example.yml`](docker-compose.example.yml).
 
-### Option 4 — Build from source
+### Option 3 — Build from source
 
-Requires: Go 1.22+, CGO enabled, Linux (ARM64 or AMD64)
+Requires: Go 1.26+, CGO enabled, Linux (ARM64 or AMD64)
 
 ```bash
 git clone https://github.com/anatolykoptev/moonshine-whisper
 cd moonshine-whisper
 go build -o moonshine-whisper .
-MOONSHINE_MODELS_DIR=./sherpa-onnx-moonshine-tiny-en-int8 ./moonshine-whisper
+MOONSHINE_MODELS_DIR=./models/en ./moonshine-whisper
 ```
 
 ## API
@@ -77,8 +64,8 @@ MOONSHINE_MODELS_DIR=./sherpa-onnx-moonshine-tiny-en-int8 ./moonshine-whisper
 curl http://localhost:8092/health
 ```
 ```json
-{"status":"ok","engine":"sherpa-onnx","version":"1.1.0","commit":"abc1234",
- "languages":{"en":{"model":"moonshine-tiny-en-int8","ready":true},"ru":{"model":"zipformer-ru-int8","ready":true}}}
+{"status":"ok","engine":"sherpa-onnx","version":"2.0.0",
+ "languages":{"en":{"model":"moonshine-v2-base-en","ready":true},"ru":{"model":"zipformer-ru-int8","ready":true}}}
 ```
 
 ### `POST /transcribe` — path-based
@@ -116,20 +103,19 @@ curl -s -X POST http://localhost:8092/transcribe/upload \
 | Env var | Default | Description |
 |---|---|---|
 | `MOONSHINE_PORT` | `8092` | HTTP listen port |
-| `MOONSHINE_MODELS_DIR` | `/models` | Path to Moonshine EN model directory |
+| `MOONSHINE_MODELS_DIR` | `/models` | Path to Moonshine v2 EN model directory |
 | `ZIPFORMER_RU_DIR` | `/ru-models` | Path to Zipformer RU model directory (optional) |
 
 ## Models
 
-| Model | Var | Size | Language | WER | Download |
-|---|---|---|---|---|---|
-| moonshine-tiny-en-int8 | `MOONSHINE_MODELS_DIR` | 103 MB | 🇺🇸 EN | ~5% | [download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2) |
-| moonshine-base-en-int8 | `MOONSHINE_MODELS_DIR` | ~200 MB | 🇺🇸 EN | ~3% | [download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-base-en-int8.tar.bz2) |
-| zipformer-ru-2024-09-18 int8 | `ZIPFORMER_RU_DIR` | 66 MB | 🇷🇺 RU | ~4.5% | [download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ru-2024-09-18.tar.bz2) |
+| Model | Var | Size | Language | Download |
+|---|---|---|---|---|
+| moonshine-v2-base-en (quantized) | `MOONSHINE_MODELS_DIR` | 135 MB | 🇺🇸 EN | [HuggingFace](https://huggingface.co/csukuangfj2/sherpa-onnx-moonshine-base-en-quantized-2026-02-27) |
+| zipformer-ru-2024-09-18 int8 | `ZIPFORMER_RU_DIR` | 66 MB | 🇷🇺 RU | [download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ru-2024-09-18.tar.bz2) |
 
 ## Stack
 
-- [Moonshine](https://github.com/usefulsensors/moonshine) — ASR model (Useful Sensors, 2024)
+- [Moonshine v2](https://github.com/usefulsensors/moonshine) — ASR model (Useful Sensors)
 - [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) — inference framework
 - [sherpa-onnx-go](https://github.com/k2-fsa/sherpa-onnx-go) — Go CGO bindings (bundles ONNX Runtime)
 - [ffmpeg](https://ffmpeg.org) — audio format conversion

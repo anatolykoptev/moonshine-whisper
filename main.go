@@ -38,6 +38,7 @@ type appConfig struct {
 	ModelsDir         string
 	RUModelsDir       string
 	VADModel          string
+	PunctModel        string
 	NumThreads        int
 	VADMinDurationS   float64
 	MaxAudioDurationS float64
@@ -70,6 +71,7 @@ func loadConfig() appConfig {
 		ModelsDir:         envOr("MOONSHINE_MODELS_DIR", "/models"),
 		RUModelsDir:       envOr("ZIPFORMER_RU_DIR", "/ru-models"),
 		VADModel:          envOr("SILERO_VAD_MODEL", "/vad/silero_vad.onnx"),
+		PunctModel:        envOr("PUNCT_MODEL", "/punct/model.int8.onnx"),
 		NumThreads:        threads,
 		VADMinDurationS:   vadMin,
 		MaxAudioDurationS: maxAudio,
@@ -85,10 +87,8 @@ func main() {
 	cfgEN := &sherpa.OfflineRecognizerConfig{}
 	cfgEN.FeatConfig.SampleRate = 16000
 	cfgEN.FeatConfig.FeatureDim = 80
-	cfgEN.ModelConfig.Moonshine.Preprocessor = filepath.Join(cfg.ModelsDir, "preprocess.onnx")
-	cfgEN.ModelConfig.Moonshine.Encoder = filepath.Join(cfg.ModelsDir, "encode.int8.onnx")
-	cfgEN.ModelConfig.Moonshine.UncachedDecoder = filepath.Join(cfg.ModelsDir, "uncached_decode.int8.onnx")
-	cfgEN.ModelConfig.Moonshine.CachedDecoder = filepath.Join(cfg.ModelsDir, "cached_decode.int8.onnx")
+	cfgEN.ModelConfig.Moonshine.Encoder = filepath.Join(cfg.ModelsDir, "encoder_model.ort")
+	cfgEN.ModelConfig.Moonshine.MergedDecoder = filepath.Join(cfg.ModelsDir, "decoder_model_merged.ort")
 	cfgEN.ModelConfig.Tokens = filepath.Join(cfg.ModelsDir, "tokens.txt")
 	cfgEN.ModelConfig.NumThreads = cfg.NumThreads
 	cfgEN.ModelConfig.Provider = "cpu"
@@ -164,6 +164,12 @@ func main() {
 		log.Printf("Silero VAD not found at %s (set SILERO_VAD_MODEL to enable)", cfg.VADModel)
 	}
 
+	if _, err := os.Stat(cfg.PunctModel); err == nil {
+		initPunctuation(cfg.PunctModel)
+	} else {
+		log.Printf("Punctuation model not found at %s (set PUNCT_MODEL to enable)", cfg.PunctModel)
+	}
+
 	warmup()
 
 	mux := http.NewServeMux()
@@ -182,6 +188,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	if punctuator != nil {
+		defer sherpa.DeleteOfflinePunc(punctuator)
+	}
+
 	ruStatus := "unavailable"
 	if recognizerRU != nil {
 		ruStatus = "ready"
@@ -190,7 +200,12 @@ func main() {
 	if vadDetector != nil {
 		vadStatus = "ready"
 	}
-	log.Printf("Service on :%s | EN: ready | RU: %s | VAD: %s", cfg.Port, ruStatus, vadStatus)
+	punctStatus := "disabled"
+	if punctuator != nil {
+		punctStatus = "ready"
+	}
+	log.Printf("Service on :%s | EN: ready | RU: %s | VAD: %s | Punct: %s",
+		cfg.Port, ruStatus, vadStatus, punctStatus)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

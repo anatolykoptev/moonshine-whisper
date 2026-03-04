@@ -1,0 +1,6 @@
+models/
+*.md
+LICENSE
+.goreleaser.yaml
+install.sh
+.git/
