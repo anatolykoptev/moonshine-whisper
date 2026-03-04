@@ -32,6 +32,7 @@ var (
 	muVAD       sync.Mutex
 )
 
+// appConfig holds all service configuration loaded from environment variables.
 type appConfig struct {
 	Port              string
 	ModelsDir         string
@@ -44,6 +45,7 @@ type appConfig struct {
 
 var cfg appConfig
 
+// loadConfig reads configuration from environment variables with sensible defaults.
 func loadConfig() appConfig {
 	threads := 4
 	if s := os.Getenv("MOONSHINE_THREADS"); s != "" {
@@ -206,6 +208,7 @@ func main() {
 	log.Println("Shutdown complete")
 }
 
+// warmup runs dummy inference on all loaded models to eliminate first-request latency.
 func warmup() {
 	samples := make([]float32, 16000)
 
@@ -227,6 +230,7 @@ func warmup() {
 	log.Println("Warmup complete")
 }
 
+// envOr returns the value of the environment variable key, or def if unset.
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

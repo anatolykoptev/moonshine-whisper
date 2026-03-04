@@ -8,23 +8,28 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
 
+// TranscribeRequest is the JSON body for POST /transcribe.
 type TranscribeRequest struct {
-	AudioPath string `json:"audio_path"`
-	Language  string `json:"language,omitempty"`
-	VAD       *bool  `json:"vad,omitempty"` // nil=auto, false=skip
+	AudioPath   string `json:"audio_path"`
+	Language    string `json:"language,omitempty"`
+	VAD         *bool  `json:"vad,omitempty"`          // nil=auto, false=skip
+	MaxChunkLen int    `json:"max_chunk_len,omitempty"` // 0=no chunking
 }
 
+// TranscribeResponse is the JSON response returned by transcription endpoints.
 type TranscribeResponse struct {
-	Text       string  `json:"text"`
-	DurationMs float64 `json:"duration_ms"`
-	SpeechMs   float64 `json:"speech_ms,omitempty"`
-	Error      string  `json:"error,omitempty"`
+	Text       string   `json:"text"`
+	Chunks     []string `json:"chunks,omitempty"`
+	DurationMs float64  `json:"duration_ms"`
+	SpeechMs   float64  `json:"speech_ms,omitempty"`
+	Error      string   `json:"error,omitempty"`
 }
 
 type statusWriter struct {
@@ -37,6 +42,7 @@ func (s *statusWriter) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
+// loggingMiddleware logs every HTTP request with method, path, status, and latency.
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -46,16 +52,19 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// writeJSON encodes v as JSON and writes it with the given HTTP status.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
 }
 
+// writeError sends an error response with the given HTTP status and message.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, TranscribeResponse{Error: msg})
 }
 
+// normLang normalizes a language string to lowercase, defaulting to "en".
 func normLang(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" {
@@ -64,6 +73,7 @@ func normLang(s string) string {
 	return s
 }
 
+// parseBoolPtr parses a string as a boolean pointer; returns nil for unrecognized values.
 func parseBoolPtr(s string) *bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "true", "1", "yes":
@@ -76,6 +86,7 @@ func parseBoolPtr(s string) *bool {
 	return nil
 }
 
+// handleHealth returns service status, model readiness, and version info.
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
@@ -90,6 +101,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleTranscribe handles POST /transcribe with a JSON body containing audio_path.
 func handleTranscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "POST only")
@@ -105,9 +117,13 @@ func handleTranscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, status := transcribeFile(req.AudioPath, normLang(req.Language), req.VAD)
+	if status == http.StatusOK && req.MaxChunkLen > 0 {
+		resp.Chunks = splitText(resp.Text, req.MaxChunkLen)
+	}
 	writeJSON(w, status, resp)
 }
 
+// handleUpload handles POST /transcribe/upload with multipart file upload.
 func handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "POST only")
@@ -139,5 +155,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	defer os.Remove(tmpFile) //nolint:errcheck
 
 	resp, status := transcribeFile(tmpFile, normLang(r.FormValue("language")), parseBoolPtr(r.FormValue("vad")))
+	if status == http.StatusOK {
+		if maxChunk, err := strconv.Atoi(r.FormValue("max_chunk_len")); err == nil && maxChunk > 0 {
+			resp.Chunks = splitText(resp.Text, maxChunk)
+		}
+	}
 	writeJSON(w, status, resp)
 }
