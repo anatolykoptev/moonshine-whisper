@@ -14,6 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Patch sherpa-onnx-go: add OnlinePunctuation (CNN-BiLSTM) Go bindings
+COPY patches/ /tmp/patches/
+RUN cp /tmp/patches/sherpa-onnx-go-linux/online_punctuation.go \
+       "$(go env GOMODCACHE)/github.com/k2-fsa/sherpa-onnx-go-linux@v1.12.28/" && \
+    cp /tmp/patches/sherpa-onnx-go/online_punctuation_linux.go \
+       "$(go env GOMODCACHE)/github.com/k2-fsa/sherpa-onnx-go@v1.12.27/sherpa_onnx/"
+
 # Extract sherpa-onnx shared libs — detect arch at build time (aarch64 / x86_64)
 RUN ARCH=$(uname -m) && \
     case "$ARCH" in \
@@ -64,6 +71,7 @@ ENV MOONSHINE_MODELS_DIR=/models
 ENV ZIPFORMER_RU_DIR=/ru-models
 ENV SILERO_VAD_MODEL=/vad/silero_vad.onnx
 ENV PUNCT_MODEL=/punct/model.int8.onnx
+ENV PUNCT_VOCAB=/punct/bpe.vocab
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=3 \
     CMD curl -sf http://localhost:8092/health || exit 1

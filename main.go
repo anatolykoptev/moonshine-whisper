@@ -39,6 +39,7 @@ type appConfig struct {
 	RUModelsDir       string
 	VADModel          string
 	PunctModel        string
+	PunctVocab        string
 	NumThreads        int
 	VADMinDurationS   float64
 	MaxAudioDurationS float64
@@ -72,6 +73,7 @@ func loadConfig() appConfig {
 		RUModelsDir:       envOr("ZIPFORMER_RU_DIR", "/ru-models"),
 		VADModel:          envOr("SILERO_VAD_MODEL", "/vad/silero_vad.onnx"),
 		PunctModel:        envOr("PUNCT_MODEL", "/punct/model.int8.onnx"),
+		PunctVocab:        envOr("PUNCT_VOCAB", "/punct/bpe.vocab"),
 		NumThreads:        threads,
 		VADMinDurationS:   vadMin,
 		MaxAudioDurationS: maxAudio,
@@ -164,8 +166,12 @@ func main() {
 		log.Printf("Silero VAD not found at %s (set SILERO_VAD_MODEL to enable)", cfg.VADModel)
 	}
 
-	if _, err := os.Stat(cfg.PunctModel); err == nil {
-		initPunctuation(cfg.PunctModel)
+	if _, errM := os.Stat(cfg.PunctModel); errM == nil {
+		if _, errV := os.Stat(cfg.PunctVocab); errV == nil {
+			initPunctuation(cfg.PunctModel, cfg.PunctVocab)
+		} else {
+			log.Printf("Punctuation vocab not found at %s (set PUNCT_VOCAB)", cfg.PunctVocab)
+		}
 	} else {
 		log.Printf("Punctuation model not found at %s (set PUNCT_MODEL to enable)", cfg.PunctModel)
 	}
@@ -189,7 +195,7 @@ func main() {
 	defer stop()
 
 	if punctuator != nil {
-		defer sherpa.DeleteOfflinePunc(punctuator)
+		defer sherpa.DeleteOnlinePunctuation(punctuator)
 	}
 
 	ruStatus := "unavailable"

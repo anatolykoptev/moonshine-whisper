@@ -13,7 +13,7 @@ All models loaded in-memory — no per-request cold start.
 
 - **8 languages** — AR, EN, ES, JA, UK, VI, ZH (Moonshine v2) + RU (Zipformer)
 - **Silero VAD** — auto-detects speech segments, skips silence
-- **Punctuation** — ct-transformer model, auto for English
+- **Punctuation** — CNN-BiLSTM model (7 MB INT8) with truecasing, auto for English
 - **Hallucination guard** — compression ratio filter on each chunk
 - **Text chunking** — split long transcripts via `max_chunk_len`
 - **Any audio format** — ffmpeg converts mp3, ogg, flac, m4a, mp4, wav...
@@ -119,6 +119,7 @@ Optional form fields: `language`, `vad`, `punctuate`, `max_chunk_len`.
 | `ZIPFORMER_RU_DIR` | `/ru-models` | Zipformer RU model directory (optional) |
 | `SILERO_VAD_MODEL` | `/vad/silero_vad.onnx` | Silero VAD model path (optional) |
 | `PUNCT_MODEL` | `/punct/model.int8.onnx` | Punctuation model path (optional) |
+| `PUNCT_VOCAB` | `/punct/bpe.vocab` | Punctuation BPE vocab path (optional) |
 | `MOONSHINE_THREADS` | `4` | Inference threads per model |
 | `VAD_MIN_DURATION_S` | `10` | Min audio duration (sec) to auto-enable VAD |
 | `MAX_AUDIO_DURATION_S` | `300` | Max audio duration (sec), rejects longer files |
@@ -130,7 +131,7 @@ Optional form fields: `language`, `vad`, `punctuate`, `max_chunk_len`.
 | Moonshine v2 base (quantized) | `MOONSHINE_MODELS_DIR` | 135 MB | [HuggingFace](https://huggingface.co/csukuangfj2/sherpa-onnx-moonshine-base-en-quantized-2026-02-27) |
 | Zipformer-RU INT8 | `ZIPFORMER_RU_DIR` | 66 MB | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ru-2024-09-18.tar.bz2) |
 | Silero VAD | `SILERO_VAD_MODEL` | 2 MB | bundled in Docker image |
-| ct-transformer punct (EN) | `PUNCT_MODEL` | 290 MB | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2) |
+| CNN-BiLSTM punct (EN) | `PUNCT_MODEL` + `PUNCT_VOCAB` | 7 MB | [sherpa-onnx releases](https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-online-punct-en-2024-08-06.tar.bz2) |
 
 ## Stack
 
