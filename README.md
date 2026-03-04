@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](go.mod)
 
-Fast **multilingual** (EN + RU) speech-to-text HTTP service powered by [Moonshine v2](https://github.com/usefulsensors/moonshine) (English) and [Zipformer](https://github.com/k2-fsa/sherpa-onnx) (Russian) via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) Go bindings.
+Fast **multilingual** speech-to-text HTTP service powered by [Moonshine v2](https://github.com/usefulsensors/moonshine) (7 languages) and [Zipformer](https://github.com/k2-fsa/sherpa-onnx) (Russian) via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) Go bindings.
 
 **Both models loaded in-memory — no per-request cold start.**
 
@@ -112,6 +112,23 @@ curl -s -X POST http://localhost:8092/transcribe/upload \
 |---|---|---|---|---|
 | moonshine-v2-base-en (quantized) | `MOONSHINE_MODELS_DIR` | 135 MB | 🇺🇸 EN | [HuggingFace](https://huggingface.co/csukuangfj2/sherpa-onnx-moonshine-base-en-quantized-2026-02-27) |
 | zipformer-ru-2024-09-18 int8 | `ZIPFORMER_RU_DIR` | 66 MB | 🇷🇺 RU | [download](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ru-2024-09-18.tar.bz2) |
+
+## Supported Languages
+
+Moonshine v2 base is a multilingual model supporting 7 languages. Russian uses a dedicated Zipformer model for better quality.
+
+| Language | Code | Model | Notes |
+|---|---|---|---|
+| **Arabic** | `ar` | Moonshine v2 base | via multilingual model |
+| **English** | `en` | Moonshine v2 base | Default language, best quality |
+| **Spanish** | `es` | Moonshine v2 base | via multilingual model |
+| **Japanese** | `ja` | Moonshine v2 base | via multilingual model |
+| **Ukrainian** | `uk` | Moonshine v2 base | via multilingual model |
+| **Vietnamese** | `vi` | Moonshine v2 base | via multilingual model |
+| **Chinese** | `zh` | Moonshine v2 base | via multilingual model |
+| **Russian** | `ru` | Zipformer-RU INT8 | Dedicated model, requires `ZIPFORMER_RU_DIR` |
+
+Language is selected per-request via the `language` field. If not specified, English is used by default. All languages except Russian use the same Moonshine v2 base model (135 MB).
 
 ## Stack
 
