@@ -1,5 +1,19 @@
 # moonshine-whisper
 
+> ## ⚠️ This project is no longer maintained
+>
+> Active development has moved to **[ox-whisper](https://github.com/anatolykoptev/ox-whisper)** — a Rust rewrite with:
+>
+> - OpenAI-compatible `/v1/audio/transcriptions` endpoint
+> - Real-time WebSocket streaming (`/v1/listen`)
+> - Word-level timestamps + per-word confidence
+> - Same 8 languages, same Moonshine v2 + Zipformer models, same VAD + punctuation
+> - Faster inference and a smaller, simpler codebase
+>
+> This Go version is preserved for reference only. **New users should use [ox-whisper](https://github.com/anatolykoptev/ox-whisper).**
+
+---
+
 [![Release](https://img.shields.io/github/v/release/anatolykoptev/moonshine-whisper)](https://github.com/anatolykoptev/moonshine-whisper/releases)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/anatolykoptev/moonshine-whisper)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
