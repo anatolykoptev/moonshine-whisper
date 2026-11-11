@@ -6,6 +6,10 @@ deprecated in favour of ox-whisper; no further releases are planned.
 
 ## [Unreleased]
 
+### Changed
+
+- Licence changed from MIT to Apache-2.0 from this version on.
+
 ### Added
 
 - Repository documents: CLAUDE.md, CONTRIBUTING, SECURITY, code of conduct, issue

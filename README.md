@@ -16,7 +16,7 @@
 
 [![Release](https://img.shields.io/github/v/release/anatolykoptev/moonshine-whisper)](https://github.com/anatolykoptev/moonshine-whisper/releases)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://ghcr.io/anatolykoptev/moonshine-whisper)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go)](go.mod)
 
 Fast **multilingual** speech-to-text HTTP service — 8 languages, Silero VAD, auto-punctuation. Powered by [Moonshine v2](https://github.com/usefulsensors/moonshine) and [Zipformer](https://github.com/k2-fsa/sherpa-onnx) via [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) Go bindings.
@@ -161,4 +161,4 @@ Deprecated; the last release is v2.1.0 and only the Docker image is published fr
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+Apache-2.0, see [LICENSE](LICENSE).
