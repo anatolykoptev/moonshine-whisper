@@ -8,4 +8,4 @@
 | [CHANGELOG](../CHANGELOG.md) | Release history from v1.0.0 to v2.1.0. |
 | [SECURITY](../SECURITY.md) | How to report a vulnerability privately. |
 | [CODE_OF_CONDUCT](../CODE_OF_CONDUCT.md) | Contributor Covenant 3.0 Code of Conduct. |
-| [LICENSE](../LICENSE) | MIT licence. |
+| [LICENSE](../LICENSE) | Apache License 2.0. |

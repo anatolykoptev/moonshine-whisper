@@ -48,7 +48,7 @@ LABEL org.opencontainers.image.title="moonshine-whisper" \
       org.opencontainers.image.description="Fast speech-to-text HTTP service via Moonshine + sherpa-onnx" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.source="https://github.com/anatolykoptev/moonshine-whisper" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates ffmpeg curl && \
