@@ -155,6 +155,10 @@ Optional form fields: `language`, `vad`, `punctuate`, `max_chunk_len`.
 - [Silero VAD](https://github.com/snakers4/silero-vad) — voice activity detection
 - [ffmpeg](https://ffmpeg.org) — audio format conversion
 
+## Status
+
+Deprecated; the last release is v2.1.0 and only the Docker image is published from tags. See [CHANGELOG.md](CHANGELOG.md) and [docs/INDEX.md](docs/INDEX.md).
+
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
